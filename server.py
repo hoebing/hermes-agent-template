@@ -1573,7 +1573,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8080"))
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    config = uvicorn.Config(app, host=os.environ.get("BIND_HOST", "::"), port=port, log_level="info", loop="asyncio")
+    config = uvicorn.Config(app, host=os.environ.get("BIND_HOST", "0.0.0.0"), port=port, log_level="info", loop="asyncio")
     server = uvicorn.Server(config)
 
     def _shutdown():
