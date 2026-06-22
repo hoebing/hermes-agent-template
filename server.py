@@ -1570,10 +1570,32 @@ app = Starlette(routes=routes, lifespan=lifespan)
 
 if __name__ == "__main__":
     import uvicorn
+    import socket as _socket
     port = int(os.environ.get("PORT", "8080"))
+    _bind = os.environ.get("BIND_HOST", "::")
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    config = uvicorn.Config(app, host=os.environ.get("BIND_HOST", "0.0.0.0"), port=port, log_level="info", loop="asyncio")
+
+    # Dual-stack listener: bind :: with IPV6_V6ONLY=0 so a SINGLE socket serves
+    # both IPv4 (Railway's edge proxy + Railway's IPv4 healthcheck) AND IPv6
+    # (Railway private networking / *.railway.internal, reached over Tailscale).
+    # host="0.0.0.0" is IPv4-only -> private net unreachable; a plain host="::"
+    # is IPv6-only on Railway (IPV6_V6ONLY defaults to 1) -> IPv4 healthcheck
+    # fails. Binding :: with IPV6_V6ONLY=0 covers both. BIND_HOST overrides; an
+    # IPv4 BIND_HOST falls back to the plain host/port bind.
+    _sockets = None
+    if ":" in _bind:
+        _ls = _socket.socket(_socket.AF_INET6, _socket.SOCK_STREAM)
+        try:
+            _ls.setsockopt(_socket.IPPROTO_IPV6, _socket.IPV6_V6ONLY, 0)
+        except (AttributeError, OSError):
+            pass
+        _ls.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+        _ls.bind((_bind, port))
+        config = uvicorn.Config(app, log_level="info", loop="asyncio")
+        _sockets = [_ls]
+    else:
+        config = uvicorn.Config(app, host=_bind, port=port, log_level="info", loop="asyncio")
     server = uvicorn.Server(config)
 
     def _shutdown():
@@ -1584,4 +1606,4 @@ if __name__ == "__main__":
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, _shutdown)
 
-    loop.run_until_complete(server.serve())
+    loop.run_until_complete(server.serve(sockets=_sockets))
