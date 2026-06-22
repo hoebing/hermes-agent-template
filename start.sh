@@ -48,4 +48,23 @@ fi
 # container), so removing the file unconditionally is safe.
 rm -f /data/.hermes/gateway.pid
 
+# --- Drive output sync (Hermes book outputs -> Google Drive) ----------------
+# Hermes writes finished book files (cover, interior PDF/EPUB, metadata) to
+# /data/outbox/<title>/. If an rclone Google Drive remote is configured via
+# RCLONE_CONFIG_GDRIVE_* env vars (set in Railway), push the outbox to Drive
+# every DRIVE_SYNC_SECONDS so the operator can inspect from Drive. Runs in the
+# background; completely inert (no-op) when the token env var is unset.
+mkdir -p /data/outbox
+if [ -n "${RCLONE_CONFIG_GDRIVE_TOKEN}" ]; then
+  (
+    while true; do
+      rclone copy /data/outbox "gdrive:${DRIVE_FOLDER:-Hermes Books}" \
+        --drive-use-trash=false --transfers=2 --checkers=2 --log-level INFO \
+        >> /data/.hermes/logs/rclone.log 2>&1 || true
+      sleep "${DRIVE_SYNC_SECONDS:-60}"
+    done
+  ) &
+fi
+# ---------------------------------------------------------------------------
+
 exec python /app/server.py
